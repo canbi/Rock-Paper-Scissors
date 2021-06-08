@@ -55,24 +55,14 @@ Configurations:
 	MOV R1, #0
 	
 Main:
-	BL StartSequence
+	//BL StartSequence
 	
 	//waiting for push button 0 interrupt
 	BL StartGame
 	
 	//GAME LOOP STARTS
 	
-	//Display "Choose R1 P2 S3" message
-	LDR R11, =CHOOSE		//Choose message
-	MOV R1, #1			//iteration exit condition
-	BL Message	
 	GameLoop:
-		//Check FINISH
-		LDR R10, =NOT_FINISH
-		LDR R9, [R10]
-		CMP R9, #0x0
-		BEQ GameFinished 	//if finished
-		
 		//Check PAUSE
 		LDR R10, =PLAY
 		LDR R9, [R10]
@@ -82,7 +72,7 @@ Main:
 		
 		PausedMessage:
 			LDR R11, =PAUSE		//Pause message
-			MOV R1, #1			//iteration exit condition
+			MOV R1, #1		//iteration exit condition
 			BL Message
 		Paused:
 			LDR R10, =PLAY
@@ -91,16 +81,37 @@ Main:
 			BEQ Paused
 
 		GameContinue:
+			//Display "Choose R1 P2 S3" message
+			LDR R11, =CHOOSE	//Choose message
+			MOV R1, #1		//iteration exit condition
+			BL Message	
+			
+		
 			//check whether the round is played
 			LDR R10, =TURN_PLAYED
 			LDR R9, [R10]
 			CMP R9, #0
 			BEQ GameLoop
 			
+			ShowResults:
 			//Acknowledge the TURN_PLAYED
 			MOV R2, #0
 			STR R2, [R10]
-			//if the round is played, show the result
+			
+			//Display who chose what
+			LDR R11, =YOU_VS_COMP
+			MOV R1, #1		//iteration exit condition
+			BL Message
+			//waits 1 seconds
+			MOV R2, #1
+			BL Sleep
+			
+			BL DisplayUserChoice
+			BL DisplayCompChoice
+			//waits 2 seconds
+			MOV R2, #2
+			BL Sleep
+			
 			LDR R10, =RESULT
 			LDR R9, [R10]
 			
@@ -133,20 +144,14 @@ Main:
 				BL Message			
 				
 			ResultWait:
-				//waits 1 seconds
+				//waits 3 seconds
 				MOV R2, #3
 				BL Sleep
-				
-				//Display "Choose R1 P2 S3" message
-				LDR R11, =CHOOSE		//Choose message
-				MOV R1, #1			//iteration exit condition
-				BL Message	
-				
 			B GameLoop
 	
 	GameFinished:
 		LDR R11, =END		//End message
-		MOV R1, #1			//iteration exit condition
+		MOV R1, #1		//iteration exit condition
 		BL Message
 		B end
 
@@ -280,7 +285,7 @@ INPUT 2		R11 => Message
 Display:
 	PUSH {R0,R6-R10,LR}
 	LDR R6, =DISP_BASE		//Display address
-	MOV R7, #0			//initially zero, for loading Welcome characters
+	MOV R7, #0			//initially zero, for loading Message characters
 	MOV R8, #0			//SUM 4 digits for displaying
 	MOV R9, #24			//offset for byte addressable
 	MOV R10, #0			//iterator
@@ -288,7 +293,7 @@ Display:
 	Loop:
 		ADD R10, R10, #1		//i = i + 1
 		//Read character
-		LDRB R7, [R11, R0] 		//get first one in the WELCOME
+		LDRB R7, [R11, R0] 		//get first one in the Message
 		ADD R8, R8, R7, LSL R9 		//byte addressable offset
 		ADD R0, R0, #1			//index = index + 1
 
@@ -308,6 +313,51 @@ Display:
 	Finished:
 		STR R8, [R6]			//display first 4 digit
 		POP {R0, R6-R10,PC}
+
+
+
+/*******************************************
+Display User Choice Subroutine
+INPUT 1		R11 => Message 
+*/
+
+DisplayUserChoice:
+	PUSH {R6-R10,LR}
+	LDR R6, =DISP_BASE	//Display address
+	LDR R7, =0x1C		//Character V
+	
+	LDR R9, =ICONS
+	LDR R8, =USER_CHOICE
+	LDR R10, [R8]
+	LDRB R8, [R9, R10] 	//User Choice 
+	
+	LSL R8, #16
+	ADD R8,R8,R7
+	STR R8, [R6, #16]	//display first 4 digit
+	POP {R6-R10,PC}
+
+
+/*******************************************
+Display Comp Choice Subroutine
+INPUT 1		R11 => Message 
+*/
+
+.equ CHARACTER_S, 0x6D000000
+DisplayCompChoice:
+	PUSH {R6-R10,LR}
+	LDR R6, =DISP_BASE	//Display address
+	LDR R7, =0x6D000000	//Character V
+	
+	LDR R9, =ICONS
+	LDR R8, =COMP_CHOICE
+	LDR R10, [R8]
+	LDRB R8, [R9, R10] 	//COMP Choice 
+	
+	LSL R8, #8
+	ADD R8,R8,R7
+	STR R8, [R6]		//display first 4 digit
+	POP {R6-R10,PC}
+
 
 /*******************************************
 Sleep Subroutine
@@ -526,6 +576,12 @@ CHECK_KEY1: 	//ROCK -> 01
 	ANDS R3, R3, R1 // check for KEY1
 	BEQ CHECK_KEY2
 	
+	//Check whether is in Paused state
+	LDR R0, =PLAY
+	LDR R1, [R0]
+	CMP R1, #0
+	BEQ END_KEY_ISR
+	
 	//Assign user choice
 	MOV R0, #1
 	LDR R1, =USER_CHOICE
@@ -541,6 +597,12 @@ CHECK_KEY2: 	//PAPER -> 10
 	MOV R3, #0x4
 	ANDS R3, R3, R1 // check for KEY2
 	BEQ IS_KEY3
+	
+	//Check whether is in Paused state
+	LDR R0, =PLAY
+	LDR R1, [R0]
+	CMP R1, #0
+	BEQ END_KEY_ISR
 	
 	//Assign user choice
 	MOV R0, #2
@@ -558,6 +620,12 @@ IS_KEY3: 	//SCISSORS -> 11
 	MOV R0, #3
 	LDR R1, =USER_CHOICE
 	STR R0, [R1]
+	
+	//Check whether is in Paused state
+	LDR R0, =PLAY
+	LDR R1, [R0]
+	CMP R1, #0
+	BEQ END_KEY_ISR
 	
 	LDR R0, =TURN_PLAYED
 	MOV R1, #1
@@ -650,9 +718,10 @@ END: .byte  0x79, 0x54,0x5E,0x00,0x00,0x00,0x00,0x00
 DRAW: .byte 0x00, 0x00, 0x78, 0x30, 0x79, 0x00, 0x00, 0x00
 COMP_WON: .byte 0x39, 0x5C, 0x55, 0x73, 0x00, 0x1D, 0x5C, 0x54
 YOU_WON: .byte 0x6E, 0x5C, 0x3E, 0x00, 0x00,  0x1D, 0x5C, 0x54
+YOU_VS_COMP: .byte 0x6E, 0x5C, 0x3E, 0x40,0x39, 0x5C, 0x55, 0x73
+ICONS: .byte 0x00,0x5C,0x3F,0x5E,0x00,0x00,0x00,0x00
 TIMER: .word 0x0 		//initially 0
 PLAY: .word 0x0			//initially 0
-NOT_FINISH: .word 0x1	//initially 1
 COMP_SCORE: .word 0x0	//initially 0
 USER_SCORE: .word 0x0	//initially 0
 COMP_CHOICE: .word 0x0	//initially 0
