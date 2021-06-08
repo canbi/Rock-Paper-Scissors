@@ -14,6 +14,7 @@ _start:
 .equ TIMER_BASE, 0xFFFEC600
 .equ DISP_BASE, 0xFF200020
 .equ PUSH_BASE, 0xFF200050
+.equ LED_BASE, 0xFF200000
 Configurations:
 	//Set up stack pointers for IRQ and SVC processor modes
 	MOV R1, #0b11010010 		//interrupts masked, MODE = IRQ
@@ -41,6 +42,14 @@ Configurations:
 	MOV R0, #0b01010011 // IRQ unmasked, MODE = SVC
 	MSR CPSR_c, R0
 	
+	//Configure timer
+	LDR R0, =TIMER_BASE 		//timer address
+	LDR R1, =0x2FAF080		//50million
+	STR R1, [R0] 			//Timer load value
+	//Load timer controls
+	MOV R1, #7 			//binary 011 to start counting
+	STR R1, [R0, #8] 		//+8 -> control adress
+	
 	//clear registers after configuration
 	MOV R0, #0
 	MOV R1, #0
@@ -52,22 +61,94 @@ Main:
 	BL StartGame
 	
 	//GAME LOOP STARTS
-		//Display "Choose R1 P2 S3" message
-	LDR R11, =CHOOSE		//Rock message
-	MOV R1, #9			//iteration exit condition
-	BL Message
 	
-	//waits 3 seconds
-	MOV R2, #3
-	BL Sleep
-		//waiting for push button interrupt
-			//TODO
-		//choose randomly RPS for bot
-			//TODO
-		//Save result to the memory
-			//TODO
-		//Show results in leds all the time.
-	B end
+	//Display "Choose R1 P2 S3" message
+	LDR R11, =CHOOSE		//Choose message
+	MOV R1, #1			//iteration exit condition
+	BL Message	
+	GameLoop:
+		//Check FINISH
+		LDR R10, =NOT_FINISH
+		LDR R9, [R10]
+		CMP R9, #0x0
+		BEQ GameFinished 	//if finished
+		
+		//Check PAUSE
+		LDR R10, =PLAY
+		LDR R9, [R10]
+		CMP R9, #0x0
+		BEQ PausedMessage	//if paused
+		B GameContinue		//if came continues
+		
+		PausedMessage:
+			LDR R11, =PAUSE		//Pause message
+			MOV R1, #1			//iteration exit condition
+			BL Message
+		Paused:
+			LDR R10, =PLAY
+			LDR R9, [R10]
+			CMP R9, #0x0
+			BEQ Paused
+
+		GameContinue:
+			//check whether the round is played
+			LDR R10, =TURN_PLAYED
+			LDR R9, [R10]
+			CMP R9, #0
+			BEQ GameLoop
+			
+			//Acknowledge the TURN_PLAYED
+			MOV R2, #0
+			STR R2, [R10]
+			//if the round is played, show the result
+			LDR R10, =RESULT
+			LDR R9, [R10]
+			
+			//DRAW -> 0
+			//COMP -> 1
+			//USER -> 2
+			CMP R9, #1
+			BEQ CompWonResult
+			CMP R9, #2
+			BEQ UserWonResult
+						
+			DrawResult:			//DRAW -> 0
+				//Display DRAW
+				LDR R11, =DRAW
+				MOV R1, #1			//iteration exit condition
+				BL Message			
+				
+				B ResultWait
+			CompWonResult:		//COMP -> 1
+				//Display COMP WON
+				LDR R11, =COMP_WON
+				MOV R1, #1			//iteration exit condition
+				BL Message			
+				
+				B ResultWait
+			UserWonResult:		//USER -> 2
+				//Display USER WON
+				LDR R11, =YOU_WON
+				MOV R1, #1			//iteration exit condition
+				BL Message			
+				
+			ResultWait:
+				//waits 1 seconds
+				MOV R2, #3
+				BL Sleep
+				
+				//Display "Choose R1 P2 S3" message
+				LDR R11, =CHOOSE		//Choose message
+				MOV R1, #1			//iteration exit condition
+				BL Message	
+				
+			B GameLoop
+	
+	GameFinished:
+		LDR R11, =END		//End message
+		MOV R1, #1			//iteration exit condition
+		BL Message
+		B end
 
 
 /*******************************************
@@ -167,15 +248,7 @@ Message:
 	PUSH {R0,R5-R10,LR}
 	MOV R0, #0			//index
 
-	//Configure timer
-	LDR R5, =TIMER_BASE 		//timer address
-	LDR R6, =0x2FAF080		//50million
-	STR R6, [R5] 			//Timer load value
-	//Load timer controls
-	MOV R6, #7 			//binary 011 to start counting
-	STR R6, [R5, #8] 		//+8 -> control adress
-
-	WelcomeLoop:
+	MessageLoop:
 		//Tımer control
 		Control:
 			LDR R10, =TIMER
@@ -191,9 +264,9 @@ Message:
 
 		//check whether loop is finished
 		CMP R0, R1
-		BEQ DoneWelcome
-		B WelcomeLoop
-	DoneWelcome:
+		BEQ DoneMessage
+		B MessageLoop
+	DoneMessage:
 		POP {R0, R5-R10,PC}
 		
 
@@ -264,7 +337,7 @@ Sleep:
 		B SleepLoop
 	DoneSleep:
 		POP {R2,R3, R9-R10, PC}
-
+		
 /* Define the exception service routines */
 /*--- Undefined instructions --------------------------------------------------*/
 SERVICE_UND:
@@ -410,13 +483,31 @@ TIMER_ISR:
 * PUSH BUTTON - Interrupt Service Routine
 **************************************************************************/
 PUSH_ISR:
+	//Get Random Choice for computer with timer
+	//00-> try again
+	//01-> rock
+	//10-> paper
+	//11-> scissors
+	random:
+		LDR R0, =TIMER_BASE
+		LDR R1, [R0, #4]
+		LSR R1, #22
+		LSL R1, #30
+		LSR R1, #30
+		MOV R0, R1
+		CMP R0, #0
+		BEQ random
+	
+	//assign COMP choice
+	LDR R1, =COMP_CHOICE
+	STR R0, [R1]
+	
 	//Acknowledge the interrupt
 	LDR R0, =PUSH_BASE 		// base address of pushbutton KEY port
 	LDR R1, [R0, #0xC] 		// read edge capture register
 	MOV R2, #0xF
 	STR R2, [R0, #0xC] 		// clear the interrupt
-	
-//
+
 CHECK_KEY0:
 	MOV R3, #0x1
 	ANDS R3, R3, R1 // check for KEY0
@@ -429,26 +520,115 @@ CHECK_KEY0:
 	STR R1, [R0]
 	
 	B END_KEY_ISR
-CHECK_KEY1:
+	
+CHECK_KEY1: 	//ROCK -> 01
 	MOV R3, #0x2
 	ANDS R3, R3, R1 // check for KEY1
 	BEQ CHECK_KEY2
 	
-	//TODO
+	//Assign user choice
+	MOV R0, #1
+	LDR R1, =USER_CHOICE
+	STR R0, [R1]
+	
+	LDR R0, =TURN_PLAYED
+	MOV R1, #1
+	STR R1, [R0]
 	
 	B END_KEY_ISR
-CHECK_KEY2:
+	
+CHECK_KEY2: 	//PAPER -> 10
 	MOV R3, #0x4
 	ANDS R3, R3, R1 // check for KEY2
 	BEQ IS_KEY3
 	
-	//TODO
+	//Assign user choice
+	MOV R0, #2
+	LDR R1, =USER_CHOICE
+	STR R0, [R1]
+	
+	LDR R0, =TURN_PLAYED
+	MOV R1, #1
+	STR R1, [R0]
 	
 	B END_KEY_ISR
-IS_KEY3:
-	//TODO
+	
+IS_KEY3: 	//SCISSORS -> 11
+	//Assign user choice
+	MOV R0, #3
+	LDR R1, =USER_CHOICE
+	STR R0, [R1]
+	
+	LDR R0, =TURN_PLAYED
+	MOV R1, #1
+	STR R1, [R0]
+	
 END_KEY_ISR:
-	BX LR
+	LDR R0, =TURN_PLAYED
+	LDR R1, [R0]
+	CMP R1, #0
+	BEQ EndOfInterrupt
+	
+	//calculate result
+	//USER R1, COMP R2
+	LDR R0, =USER_CHOICE
+	LDR R1, [R0]
+	LDR R0, =COMP_CHOICE
+	LDR R2, [R0]
+	
+	//DRAW -> 0
+	//COMP -> 1
+	//USER -> 2
+	MOV R3, #0	//RESULT
+	MOV R0, #0	//SUM
+	
+	//Draw Condition
+	CMP R1,R2
+	BEQ Calculated
+	
+	ADD R0,R1,R2
+	CMP R0, #3
+	BEQ PaperWon
+	CMP R0, #4
+	BEQ RockWon
+	CMP R0, #5
+	BEQ ScissorsWon
+	
+	PaperWon:		//Who is paper?
+		CMP R1, #2
+		BEQ UserPaper
+		CompPaper:
+			MOV R3, #1
+			B Calculated
+		UserPaper:
+			MOV R3, #2
+		B Calculated
+		
+	RockWon: 		//Who is rock?
+		CMP R1, #1
+		BEQ UserRock
+		CompRock:
+			MOV R3, #1
+			B Calculated
+		UserRock:
+			MOV R3, #2
+		B Calculated
+	
+	ScissorsWon:	//Who is scissors?
+		CMP R1, #3
+		BEQ UserScissors
+		CompScissors:
+			MOV R3, #1
+			B Calculated
+		UserScissors:
+			MOV R3, #2
+		
+	Calculated:
+		//Write result to the RESULT
+		LDR R0, =RESULT
+		STR R3, [R0]
+	EndOfInterrupt:
+		BX LR
 
 end: B end
 //WELCOME: HELLO THIS IS ROCK PAPER SCISSORS GAME
@@ -464,7 +644,19 @@ PAPER_BUTTON: .byte 0x73, 0x77 ,0x73, 0x79, 0x50, 0x40, 0x00, 0x5B
 SCISSORS_BUTTON: .byte 0x6D, 0x39, 0x30, 0x6D, 0x6D, 0x40, 0x00, 0x4F
 PLAY_PAUSE_BUTTON: .byte 0x73, 0x38, 0x77, 0x6E, 0x00, 0x5C, 0x50, 0x00, 0x73, 0x77, 0x3E, 0x6D, 0x79, 0x00, 0x7C, 0x3E, 0x78, 0x78, 0x5C, 0x54, 0x00, 0x40, 0x00, 0x3F
 START: .byte 0x6D, 0x78, 0x77, 0x50, 0x78, 0x00, 0x00, 0x3F
-CHOOSE: .byte 0x00,0x39,0x76,0x5C,0x5C,0x6D,0x79,0x00,0x50,0x06, 0x00, 0x73,0x5B,0x00,0x6D,0x4F
-TIMER: .word 0x0 	//initially 0
-PLAY: .word 0x0		//initially 0
+CHOOSE: .byte 0x39,0x76,0x5C,0x5C,0x6D,0x79,0x00,0x00
+PAUSE: .byte  0x73,0x77,0x3E,0x6D,0x79,0x5E,0x00,0x00
+END: .byte  0x79, 0x54,0x5E,0x00,0x00,0x00,0x00,0x00
+DRAW: .byte 0x00, 0x00, 0x78, 0x30, 0x79, 0x00, 0x00, 0x00
+COMP_WON: .byte 0x39, 0x5C, 0x55, 0x73, 0x00, 0x1D, 0x5C, 0x54
+YOU_WON: .byte 0x6E, 0x5C, 0x3E, 0x00, 0x00,  0x1D, 0x5C, 0x54
+TIMER: .word 0x0 		//initially 0
+PLAY: .word 0x0			//initially 0
+NOT_FINISH: .word 0x1	//initially 1
+COMP_SCORE: .word 0x0	//initially 0
+USER_SCORE: .word 0x0	//initially 0
+COMP_CHOICE: .word 0x0	//initially 0
+USER_CHOICE: .word 0x0	//initially 0
+RESULT: .word 0x0 		//initially 0
+TURN_PLAYED: .word 0x0  //initially 0
 .end
