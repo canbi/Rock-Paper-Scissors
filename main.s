@@ -55,26 +55,32 @@ Configurations:
 	MOV R1, #0
 	
 Main:
-	//BL StartSequence
+	BL StartSequence
 	
 	//waiting for push button 0 interrupt
 	BL StartGame
 	
 	//GAME LOOP STARTS
-	
 	GameLoop:
+		//Check FINISH
+		LDR R10, =NOT_FINISH
+		LDR R9, [R10]
+		CMP R9, #0x0
+		BEQ GameFinished 	//if finished
+	
 		//Check PAUSE
 		LDR R10, =PLAY
 		LDR R9, [R10]
 		CMP R9, #0x0
 		BEQ PausedMessage	//if paused
-		B GameContinue		//if came continues
+		B GameContinue		//if game continues
 		
 		PausedMessage:
 			LDR R11, =PAUSE		//Pause message
-			MOV R1, #1		//iteration exit condition
+			MOV R1, #1			//iteration exit condition
 			BL Message
-		Paused:
+		
+		Paused: //Pause Idle Loop
 			LDR R10, =PLAY
 			LDR R9, [R10]
 			CMP R9, #0x0
@@ -82,10 +88,9 @@ Main:
 
 		GameContinue:
 			//Display "Choose R1 P2 S3" message
-			LDR R11, =CHOOSE	//Choose message
-			MOV R1, #1		//iteration exit condition
+			LDR R11, =CHOOSE		//Choose message
+			MOV R1, #1			//iteration exit condition
 			BL Message	
-			
 		
 			//check whether the round is played
 			LDR R10, =TURN_PLAYED
@@ -93,68 +98,123 @@ Main:
 			CMP R9, #0
 			BEQ GameLoop
 			
-			ShowResults:
-			//Acknowledge the TURN_PLAYED
-			MOV R2, #0
-			STR R2, [R10]
+			//If the round is played, then Show Results
+			BL ShowResults
 			
-			//Display who chose what
-			LDR R11, =YOU_VS_COMP
-			MOV R1, #1		//iteration exit condition
-			BL Message
-			//waits 1 seconds
-			MOV R2, #1
-			BL Sleep
+			//Check game is finished or not
+			BL CheckScores
 			
-			BL DisplayUserChoice
-			BL DisplayCompChoice
-			//waits 2 seconds
-			MOV R2, #2
-			BL Sleep
-			
-			LDR R10, =RESULT
-			LDR R9, [R10]
-			
-			//DRAW -> 0
-			//COMP -> 1
-			//USER -> 2
-			CMP R9, #1
-			BEQ CompWonResult
-			CMP R9, #2
-			BEQ UserWonResult
-						
-			DrawResult:			//DRAW -> 0
-				//Display DRAW
-				LDR R11, =DRAW
-				MOV R1, #1			//iteration exit condition
-				BL Message			
-				
-				B ResultWait
-			CompWonResult:		//COMP -> 1
-				//Display COMP WON
-				LDR R11, =COMP_WON
-				MOV R1, #1			//iteration exit condition
-				BL Message			
-				
-				B ResultWait
-			UserWonResult:		//USER -> 2
-				//Display USER WON
-				LDR R11, =YOU_WON
-				MOV R1, #1			//iteration exit condition
-				BL Message			
-				
-			ResultWait:
-				//waits 3 seconds
-				MOV R2, #3
-				BL Sleep
 			B GameLoop
 	
 	GameFinished:
 		LDR R11, =END		//End message
-		MOV R1, #1		//iteration exit condition
+		MOV R1, #1			//iteration exit condition
 		BL Message
 		B end
+/*******************************************
+Check Results  Subroutine
+Best of 5 control
+*/
+CheckScores:
+	PUSH {R9-R10,LR}
+	LDR R9, =USER_SCORE
+	LDR R10, [R9]
+	CMP R10, #3
+	BEQ UpdateFinishedFlag
+	
+	LDR R9, =COMP_SCORE
+	LDR R10, [R9]
+	CMP R10, #3
+	BEQ UpdateFinishedFlag
+	B DoneCheckScores
+	
+	UpdateFinishedFlag:
+		LDR R9, =NOT_FINISH
+		MOV R10, #0
+		STR R10, [R9]
+	DoneCheckScores:
+		POP {R9,R10,PC}
+	
+/*******************************************
+Show Result Subroutine
+*/
+ShowResults:
+	PUSH {R1,R2,R9-R11,LR}
+	
+	//Acknowledge the TURN_PLAYED
+	LDR R10, =TURN_PLAYED
+	MOV R11, #0
+	STR R11, [R10]
 
+	//Display who chose what
+	LDR R11, =YOU_VS_COMP
+	MOV R1, #1			//iteration exit condition
+	BL Message
+	//waits 1 seconds
+	MOV R2, #1
+	BL Sleep
+
+	BL DisplayUserChoice
+	BL DisplayCompChoice
+	//waits 2 seconds
+	MOV R2, #2
+	BL Sleep
+
+	//DRAW -> 0
+	//COMP -> 1
+	//USER -> 2
+	LDR R10, =RESULT
+	LDR R9, [R10]
+	CMP R9, #1
+	BEQ CompWonResult
+	CMP R9, #2
+	BEQ UserWonResult
+
+	//Display DRAW
+	DrawResult:			//DRAW -> 0
+		LDR R11, =DRAW
+		MOV R1, #1			//iteration exit condition
+		BL Message			
+		B ResultWait
+	
+	//Display COMP WON
+	CompWonResult:		//COMP -> 1
+		//update score
+		LDR R11, =COMP_SCORE
+		LDR R1, [R11]
+		ADD R1,R1,#1
+		STR R1, [R11]
+		
+		LDR R11, =COMP_WON
+		MOV R1, #1			//iteration exit condition
+		BL Message			
+		B ResultWait
+	
+	//Display USER WON
+	UserWonResult:		//USER -> 2
+		//update score
+		LDR R11, =USER_SCORE
+		LDR R1, [R11]
+		ADD R1,R1,#1
+		STR R1, [R11]
+		
+		LDR R11, =YOU_WON
+		MOV R1, #1			//iteration exit condition
+		BL Message			
+
+	ResultWait:
+		//waits 3 seconds
+		MOV R2, #3
+		BL Sleep
+		
+		//Show Scores
+		BL DisplayUserScore
+		BL DisplayCompScore
+		//waits 2 seconds
+		MOV R2, #2
+		BL Sleep
+		
+	POP {R1,R2,R9-R11,PC}
 
 /*******************************************
 Start Game Subroutine
@@ -311,16 +371,12 @@ Display:
 		MOV R8, #0			//reset SUM 4 hex digit
 		B Loop
 	Finished:
-		STR R8, [R6]			//display first 4 digit
+		STR R8, [R6]			//display last 4 digit
 		POP {R0, R6-R10,PC}
-
-
 
 /*******************************************
 Display User Choice Subroutine
-INPUT 1		R11 => Message 
 */
-
 DisplayUserChoice:
 	PUSH {R6-R10,LR}
 	LDR R6, =DISP_BASE	//Display address
@@ -329,35 +385,66 @@ DisplayUserChoice:
 	LDR R9, =ICONS
 	LDR R8, =USER_CHOICE
 	LDR R10, [R8]
-	LDRB R8, [R9, R10] 	//User Choice 
+	LDRB R8, [R9, R10] 		//User Choice 
 	
 	LSL R8, #16
 	ADD R8,R8,R7
-	STR R8, [R6, #16]	//display first 4 digit
+	STR R8, [R6, #16]		//display first 4 digit
 	POP {R6-R10,PC}
-
 
 /*******************************************
 Display Comp Choice Subroutine
-INPUT 1		R11 => Message 
 */
-
-.equ CHARACTER_S, 0x6D000000
 DisplayCompChoice:
 	PUSH {R6-R10,LR}
 	LDR R6, =DISP_BASE	//Display address
-	LDR R7, =0x6D000000	//Character V
+	LDR R7, =0x6D000000		//Character V
 	
 	LDR R9, =ICONS
 	LDR R8, =COMP_CHOICE
 	LDR R10, [R8]
-	LDRB R8, [R9, R10] 	//COMP Choice 
+	LDRB R8, [R9, R10] 		//COMP Choice 
 	
 	LSL R8, #8
 	ADD R8,R8,R7
-	STR R8, [R6]		//display first 4 digit
+	STR R8, [R6]		//display last 4 digit
 	POP {R6-R10,PC}
 
+/*******************************************
+Display User Result Subroutine
+*/
+DisplayUserScore:
+	PUSH {R6-R10,LR}
+	LDR R6, =DISP_BASE	//Display address
+	LDR R7, =0x1C		//Character V
+	
+	LDR R9, =NUMBERS
+	LDR R8, =USER_SCORE
+	LDR R10, [R8]
+	LDRB R8, [R9, R10] 		//User Choice 
+	
+	LSL R8, #16
+	ADD R8,R8,R7
+	STR R8, [R6, #16]		//display first 4 digit
+	POP {R6-R10,PC}
+
+/*******************************************
+Display Comp Result Subroutine
+*/
+DisplayCompScore:
+	PUSH {R6-R10,LR}
+	LDR R6, =DISP_BASE	//Display address
+	LDR R7, =0x6D000000		//Character V
+	
+	LDR R9, =NUMBERS
+	LDR R8, =COMP_SCORE
+	LDR R10, [R8]
+	LDRB R8, [R9, R10] 		//COMP Choice 
+	
+	LSL R8, #8
+	ADD R8,R8,R7
+	STR R8, [R6]		//display last 4 digit
+	POP {R6-R10,PC}
 
 /*******************************************
 Sleep Subroutine
@@ -712,7 +799,7 @@ PAPER_BUTTON: .byte 0x73, 0x77 ,0x73, 0x79, 0x50, 0x40, 0x00, 0x5B
 SCISSORS_BUTTON: .byte 0x6D, 0x39, 0x30, 0x6D, 0x6D, 0x40, 0x00, 0x4F
 PLAY_PAUSE_BUTTON: .byte 0x73, 0x38, 0x77, 0x6E, 0x00, 0x5C, 0x50, 0x00, 0x73, 0x77, 0x3E, 0x6D, 0x79, 0x00, 0x7C, 0x3E, 0x78, 0x78, 0x5C, 0x54, 0x00, 0x40, 0x00, 0x3F
 START: .byte 0x6D, 0x78, 0x77, 0x50, 0x78, 0x00, 0x00, 0x3F
-CHOOSE: .byte 0x39,0x76,0x5C,0x5C,0x6D,0x79,0x00,0x00
+CHOOSE: .byte 0x00, 0x39,0x76,0x5C,0x5C,0x6D,0x79,0x00
 PAUSE: .byte  0x73,0x77,0x3E,0x6D,0x79,0x5E,0x00,0x00
 END: .byte  0x79, 0x54,0x5E,0x00,0x00,0x00,0x00,0x00
 DRAW: .byte 0x00, 0x00, 0x78, 0x30, 0x79, 0x00, 0x00, 0x00
@@ -720,6 +807,7 @@ COMP_WON: .byte 0x39, 0x5C, 0x55, 0x73, 0x00, 0x1D, 0x5C, 0x54
 YOU_WON: .byte 0x6E, 0x5C, 0x3E, 0x00, 0x00,  0x1D, 0x5C, 0x54
 YOU_VS_COMP: .byte 0x6E, 0x5C, 0x3E, 0x40,0x39, 0x5C, 0x55, 0x73
 ICONS: .byte 0x00,0x5C,0x3F,0x5E,0x00,0x00,0x00,0x00
+NUMBERS: .byte 0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F, 0x00, 0x00
 TIMER: .word 0x0 		//initially 0
 PLAY: .word 0x0			//initially 0
 COMP_SCORE: .word 0x0	//initially 0
@@ -728,4 +816,5 @@ COMP_CHOICE: .word 0x0	//initially 0
 USER_CHOICE: .word 0x0	//initially 0
 RESULT: .word 0x0 		//initially 0
 TURN_PLAYED: .word 0x0  //initially 0
+NOT_FINISH: .word 0x1	//initially 1
 .end
