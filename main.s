@@ -11,75 +11,118 @@
 .global _start
 _start:
 
-//Set up stack pointers for IRQ and SVC processor modes
-MOV R1, #0b11010010 		//interrupts masked, MODE = IRQ
-MSR CPSR_c, R1 			//change to IRQ mode
-LDR SP, =0xFFFFFFFF - 3 	//set IRQ stack to A9 onchip memory
+Configurations:
+	//Set up stack pointers for IRQ and SVC processor modes
+	MOV R1, #0b11010010 		//interrupts masked, MODE = IRQ
+	MSR CPSR_c, R1 			//change to IRQ mode
+	LDR SP, =0xFFFFFFFF - 3 	//set IRQ stack to A9 onchip memory
 
-//Change to SVC (supervisor) mode with interrupts disabled
-MOV R1, #0b11010011 		//interrupts masked, MODE = SVC
-MSR CPSR, R1 			//change to supervisor mode
-LDR SP, =0x3FFFFFFF - 3 	//set SVC stack to top of DDR3 memory
-BL CONFIG_GIC 			//configure the ARM GIC
+	//Change to SVC (supervisor) mode with interrupts disabled
+	MOV R1, #0b11010011 		//interrupts masked, MODE = SVC
+	MSR CPSR, R1 			//change to supervisor mode
+	LDR SP, =0x3FFFFFFF - 3 	//set SVC stack to top of DDR3 memory
+	BL CONFIG_GIC 			//configure the ARM GIC
 
-/*
-//write to the pushbutton KEY interrupt mask register
-LDR R0, =0xFF200050 		//pushbutton KEY base address
-MOV R1, #0x8 			//set interrupt mask bits
-STR R1, [R0, #0x8] 		//interrupt mask register (base + 8)*/
+	/*
+	//write to the pushbutton KEY interrupt mask register
+	LDR R0, =0xFF200050 		//pushbutton KEY base address
+	MOV R1, #0x8 			//set interrupt mask bits
+	STR R1, [R0, #0x8] 		//interrupt mask register (base + 8)*/
 
-LDR R0, =0xFFFEC60C 		//Cortex-A9 Private Timer Interrupt status base address
-MOV R1, #0x1 			//set interrupt mask bit
-STR R1, [R0]			//interrupt mask register
+	LDR R0, =0xFFFEC60C 		//Cortex-A9 Private Timer Interrupt status base address
+	MOV R1, #0x1 			//set interrupt mask bit
+	STR R1, [R0]			//interrupt mask register
 
-//enable IRQ interrupts in the processor
-MOV R0, #0b01010011 // IRQ unmasked, MODE = SVC
-MSR CPSR_c, R0
+	//enable IRQ interrupts in the processor
+	MOV R0, #0b01010011 // IRQ unmasked, MODE = SVC
+	MSR CPSR_c, R0
 
 /**
-R0		index
+R1		message iteration exit condition
+R2		Timer value
 R11		message
 */
-LDR R11, =WELCOME		//Welcome message
-MOV R0, #0			//index
-MOV R1, #39			//iteration exit condition
-LDR R5, =0xFFFEC600 		//timer address
-
-//Configure timer
-LDR r6, =0x5F5E100		//100million
-STR r6, [r5] 			//Timer load value
-
-//Load timer controls
-MOV R6, #7 			//binary 011 to start counting
-STR R6, [R5, #8] 		//+8 -> control adress
-
-WelcomeLoop:
-	//Tımer control
-	Control:
-		LDR R10, =TIMER
-		LDR R9, [R10]
-		CMP R9, #0x0
-		BEQ Control
+.equ TIMER_BASE, 0xFFFEC600
+.equ DISP_BASE, 0xFF200020
+Main:
+	LDR R11, =ANIMATION		//Animation
+	MOV R1, #12			//iteration exit condition
+	BL Message
 	
-	//Set TIMER 0 again
-	MOV R9, #0
-	STR R9, [R10]
-	BL Display
-	ADD R0, R0, #1		//i = i + 1
+	LDR R11, =WELCOME		//Welcome message
+	MOV R1, #39			//iteration exit condition
+	BL Message
 	
-	//check whether loop is finished
-	CMP R0, R1
-	BEQ end
+	LDR R11, =ROCK			//Rock message
+	MOV R1, #1			//iteration exit condition
+	BL Message
 	
-	// TODO TIMER INTERRUPT
-	/*DODELAY:	
-		LDR R2, =400000		// delay counter
-		SUBLOOP:
-			SUBS R2, R2, #1
-			BNE SUBLOOP*/
-	B WelcomeLoop
+	//waits 3 seconds
+	MOV R2, #3
+	BL Sleep
+	
+	LDR R11, =PAPER			//Paper message
+	MOV R1, #1			//iteration exit condition
+	BL Message
+	
+	//waits 3 seconds
+	MOV R2, #4
+	BL Sleep
+	
+	LDR R11, =SCISSORS		//Scissors message
+	MOV R1, #1			//iteration exit condition
+	BL Message
+	
+	//waits 3 seconds
+	MOV R2, #5
+	BL Sleep
+	B end
 
-/**	
+
+
+/*******************************************
+Message Subroutine
+Displays messages in seven segment display
+Starting index always 0
+	
+INPUT 1		R1	=> iteration exit condition
+INPUT 2		R11 => Message 
+*/
+Message:
+	PUSH {R0,R5-R10,LR}
+	MOV R0, #0			//index
+
+	//Configure timer
+	LDR R5, =TIMER_BASE 		//timer address
+	LDR R6, =0x2FAF080		//50million
+	STR R6, [R5] 			//Timer load value
+	//Load timer controls
+	MOV R6, #7 			//binary 011 to start counting
+	STR R6, [R5, #8] 		//+8 -> control adress
+
+	WelcomeLoop:
+		//Tımer control
+		Control:
+			LDR R10, =TIMER
+			LDR R9, [R10]
+			CMP R9, #0x0
+			BEQ Control
+
+		//Set TIMER 0 again
+		MOV R9, #0
+		STR R9, [R10]
+		BL Display
+		ADD R0, R0, #1		//i = i + 1
+
+		//check whether loop is finished
+		CMP R0, R1
+		BEQ DoneWelcome
+		B WelcomeLoop
+	DoneWelcome:
+		POP {R0, R5-R10,PC}
+		
+
+/*******************************************
 Display Subroutine
 Displays 8 character into seven segment display
 	
@@ -87,9 +130,8 @@ INPUT 1		R0	=> index
 INPUT 2		R11 => Message 
 */
 Display:
-	//TODO PUSH
 	PUSH {R0,R6-R10,LR}
-	LDR R6, =0xFF200020		//Display address
+	LDR R6, =DISP_BASE		//Display address
 	MOV R7, #0			//initially zero, for loading Welcome characters
 	MOV R8, #0			//SUM 4 digits for displaying
 	MOV R9, #24			//offset for byte addressable
@@ -118,6 +160,35 @@ Display:
 	Finished:
 		STR R8, [R6]			//display first 4 digit
 		POP {R0, R6-R10,PC}
+
+/*******************************************
+Sleep Subroutine
+Displays messages in seven segment display
+Starting index always 0
+	
+INPUT 1		R2	=> second
+*/
+Sleep:
+	PUSH {R3, R9-R10, LR}
+	LSL R2, #2		//Multiply with 4 for get seconds
+	MOV R3, #0		//iteration
+	SleepLoop:
+		ControlSleep:
+			LDR R10, =TIMER
+			LDR R9, [R10]
+			CMP R9, #0x0
+			BEQ ControlSleep
+		
+		//Set TIMER 0 again
+		MOV R9, #0
+		STR R9, [R10]
+		
+		ADD R3, R3, #1		//i = i + 1
+		CMP R3, R2 		//compare with given seconds value
+		BEQ	DoneSleep
+		B SleepLoop
+	DoneSleep:
+		POP {R3, R9-R10, PC}
 
 /* Define the exception service routines */
 /*--- Undefined instructions --------------------------------------------------*/
@@ -226,7 +297,6 @@ CONFIG_INTERRUPT:
 /*************************************************************************
 * TIMER - Interrupt Service Routine
 **************************************************************************/
-.equ TIMER_BASE, 0xFFFEC600
 TIMER_ISR:
 	END_ISR:
 		//Toggle TIMER
@@ -243,6 +313,11 @@ TIMER_ISR:
 
 end: B end
 //WELCOME: HELLO THIS IS ROCK PAPER SCISSORS GAME
+ANIMATION: .byte 0x00, 0x00, 0x00, 0x00, 0x20, 0x60, 0x44, 0x0C, 0x18, 0x50, 0x42, 0x02, 0x00, 0x00, 0x00, 0x00,0x00, 0x00, 0x00, 0x00
 WELCOME: .byte 0x76, 0x79, 0x38, 0x38, 0x5C, 0x00, 0x78, 0x76, 0x30, 0x6D,0x00, 0x30, 0x6D,0x00, 0x50, 0x5C, 0x39, 0x75, 0x00, 0x73, 0x77 ,0x73, 0x79, 0x50,0x00, 0x6D, 0x39, 0x30, 0x6D, 0x6D, 0x5C,  0x50, 0x6D,0x00, 0x3D, 0x77, 0x55, 0x79, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,0x00,0x00 
-TIMER: .word 0x0 	//initially true
+LETSPLAY: .byte 0x38, 0x79, 0x78, 0x6D, 0x00, 0x73, 0x38, 0x77, 0x6E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+ROCK: .byte 0x50, 0x5C, 0x39, 0x75, 0x00, 0x00, 0x00, 0x5C
+PAPER: .byte 0x73, 0x77 ,0x73, 0x79, 0x50, 0x00, 0x00, 0x5E
+SCISSORS: .byte 0x6D, 0x39, 0x30, 0x6D, 0x6D, 0x00, 0x00, 0x3F
+TIMER: .word 0x0 	//initially false
 .end
