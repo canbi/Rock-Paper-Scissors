@@ -11,6 +11,9 @@
 .global _start
 _start:
 
+.equ TIMER_BASE, 0xFFFEC600
+.equ DISP_BASE, 0xFF200020
+.equ PUSH_BASE, 0xFF200050
 Configurations:
 	//Set up stack pointers for IRQ and SVC processor modes
 	MOV R1, #0b11010010 		//interrupts masked, MODE = IRQ
@@ -23,34 +26,86 @@ Configurations:
 	LDR SP, =0x3FFFFFFF - 3 	//set SVC stack to top of DDR3 memory
 	BL CONFIG_GIC 			//configure the ARM GIC
 
-	/*
-	//write to the pushbutton KEY interrupt mask register
-	LDR R0, =0xFF200050 		//pushbutton KEY base address
-	MOV R1, #0x8 			//set interrupt mask bits
-	STR R1, [R0, #0x8] 		//interrupt mask register (base + 8)*/
-
-	LDR R0, =0xFFFEC60C 		//Cortex-A9 Private Timer Interrupt status base address
+	//PUSH BUTTON
+	LDR R0, =PUSH_BASE	 	//pushbutton KEY base address
+	//Initially only push button 0 is functional
+	MOV R1, #0x1 			//set interrupt mask bits
+	STR R1, [R0, #0x8] 		//interrupt mask register (base + 8)
+	
+	//TIMER
+	LDR R0, =TIMER_BASE 		//Cortex-A9 Private Timer Interrupt status base address
 	MOV R1, #0x1 			//set interrupt mask bit
-	STR R1, [R0]			//interrupt mask register
+	STR R1, [R0, #0xC]		//interrupt mask register
 
 	//enable IRQ interrupts in the processor
 	MOV R0, #0b01010011 // IRQ unmasked, MODE = SVC
 	MSR CPSR_c, R0
-
-/**
-R1		message iteration exit condition
-R2		Timer value
-R11		message
-*/
-.equ TIMER_BASE, 0xFFFEC600
-.equ DISP_BASE, 0xFF200020
+	
+	//clear registers after configuration
+	MOV R0, #0
+	MOV R1, #0
+	
 Main:
-	LDR R11, =ANIMATION		//Animation
-	MOV R1, #12			//iteration exit condition
+	BL StartSequence
+	
+	//waiting for push button 0 interrupt
+	BL StartGame
+	
+	//GAME LOOP STARTS
+		//Display "Choose R1 P2 S3" message
+	LDR R11, =CHOOSE		//Rock message
+	MOV R1, #9			//iteration exit condition
 	BL Message
 	
+	//waits 3 seconds
+	MOV R2, #3
+	BL Sleep
+		//waiting for push button interrupt
+			//TODO
+		//choose randomly RPS for bot
+			//TODO
+		//Save result to the memory
+			//TODO
+		//Show results in leds all the time.
+	B end
+
+
+/*******************************************
+Start Game Subroutine
+Starts the game, Play flag is now 1
+All the push buttons are functional
+*/
+StartGame:
+	PUSH {R10,R11,LR}
+	//Play control
+	PlayControl:
+		LDR R10, =PLAY
+		LDR R11, [R10]
+		CMP R11, #0x0
+		BEQ PlayControl	
+	
+	//All push buttons are now functional
+	LDR R10, =PUSH_BASE	 	//pushbutton KEY base address
+	MOV R11, #0xF 			//set interrupt mask bits
+	STR R11, [R10, #0x8] 		//interrupt mask register (base + 8)
+	POP {R10,R11,PC}
+
+/*******************************************
+Start Sequence Subroutine
+Displays start messages
+*/
+StartSequence:
+	PUSH {R1,R2,R11,LR}
+	LDR R11, =ANIMATION		//Animation
+	MOV R1, #1			//iteration exit condition
+	BL Message
+	
+	//waits 1 seconds
+	MOV R2, #2
+	BL Sleep
+	
 	LDR R11, =WELCOME		//Welcome message
-	MOV R1, #39			//iteration exit condition
+	MOV R1, #47			//iteration exit condition
 	BL Message
 	
 	//waits 1 seconds
@@ -66,78 +121,39 @@ Main:
 	BL Sleep
 	
 	LDR R11, =PAPER			//Paper message
-	MOV R1, #1			//iteration exit condition
 	BL Message
 	
-	//waits 3 seconds
-	MOV R2, #3
-	BL Sleep
-	
+	BL Sleep			//waits 3 seconds
 	LDR R11, =SCISSORS		//Scissors message
-	MOV R1, #1			//iteration exit condition
 	BL Message
 	
-	//waits 3 seconds
-	MOV R2, #3
-	BL Sleep
-	
+	BL Sleep			//waits 3 seconds
 	LDR R11, =BUTTONS		//Buttons message
-	MOV R1, #1			//iteration exit condition
 	BL Message
 	
-	//waits 3 seconds
-	MOV R2, #3
-	BL Sleep
-	
+	BL Sleep			//waits 3 seconds
 	LDR R11, =PLAY_PAUSE_BUTTON	//Play or pause button message
 	MOV R1, #17			//iteration exit condition
 	BL Message
 	
-	//waits 3 seconds
-	MOV R2, #3
-	BL Sleep
-	
+	BL Sleep			//waits 3 seconds
 	LDR R11, =ROCK_BUTTON		//Rock button message
 	MOV R1, #1			//iteration exit condition
 	BL Message
 	
-	//waits 3 seconds
-	MOV R2, #3
-	BL Sleep
-	
+	BL Sleep			//waits 3 seconds
 	LDR R11, =PAPER_BUTTON		//Paper button message
-	MOV R1, #1			//iteration exit condition
 	BL Message
 	
-	//waits 3 seconds
-	MOV R2, #3
-	BL Sleep
-	
+	BL Sleep			//waits 3 seconds
 	LDR R11, =SCISSORS_BUTTON	//Scissors button message
-	MOV R1, #1			//iteration exit condition
 	BL Message
 	
-	//waits 3 seconds
-	MOV R2, #3
-	BL Sleep
-	
+	BL Sleep			//waits 3 seconds
 	LDR R11, =START			//Start message
-	MOV R1, #1			//iteration exit condition
 	BL Message
 	
-
-	//waiting for push button 0 interrupt
-	
-	//Display "Choose R1 P2 S3" message
-
-	//waiting for push button interrupt
-	
-	//choose randomly RPS for bot
-
-	//Save result to the memory
-
-	//Show results in leds all the time.
-	B end
+	POP {R1,R2,R11,PC}
 
 /*******************************************
 Message Subroutine
@@ -190,7 +206,7 @@ INPUT 2		R11 => Message
 */
 Display:
 	PUSH {R0,R6-R10,LR}
-	LDR R6, =DISP_BASE	//Display address
+	LDR R6, =DISP_BASE		//Display address
 	MOV R7, #0			//initially zero, for loading Welcome characters
 	MOV R8, #0			//SUM 4 digits for displaying
 	MOV R9, #24			//offset for byte addressable
@@ -228,7 +244,7 @@ Starting index always 0
 INPUT 1		R2	=> second
 */
 Sleep:
-	PUSH {R3, R9-R10, LR}
+	PUSH {R2,R3, R9-R10, LR}
 	LSL R2, #2		//Multiply with 4 for get seconds
 	MOV R3, #0		//iteration
 	SleepLoop:
@@ -242,12 +258,12 @@ Sleep:
 		MOV R9, #0
 		STR R9, [R10]
 		
-		ADD R3, R3, #1	//i = i + 1
+		ADD R3, R3, #1		//i = i + 1
 		CMP R3, R2 		//compare with given seconds value
 		BEQ	DoneSleep
 		B SleepLoop
 	DoneSleep:
-		POP {R3, R9-R10, PC}
+		POP {R2,R3, R9-R10, PC}
 
 /* Define the exception service routines */
 /*--- Undefined instructions --------------------------------------------------*/
@@ -269,12 +285,26 @@ SERVICE_IRQ:
 	/* Read the ICCIAR from the CPU Interface */
 	LDR R4, =0xFFFEC100
 	LDR R5, [R4, #0x0C] 	//read from ICCIAR
+	
 FPGA_IRQ1_HANDLER:
+	//Timer control
 	CMP R5, #29
+	BEQ TimerInterrupt
+	
+	//Push button control
+	CMP R5, #73
+	BEQ PushInterrupt
+	
 	UNEXPECTED:
-		BNE UNEXPECTED 	//if not recognized, stop here
+	BNE UNEXPECTED // if not recognized, stop here
+	
+	PushInterrupt:
+		BL PUSH_ISR
+		B EXIT_IRQ
+	
 	TimerInterrupt:
 		BL TIMER_ISR
+		
 EXIT_IRQ:
 	/* Write to the End of Interrupt Register (ICCEOIR) */
 	STR R5, [R4, #0x10] 	//write to ICCEOIR
@@ -290,8 +320,15 @@ SERVICE_FIQ:
 CONFIG_GIC:
 	PUSH {LR}
 /* CONFIG_INTERRUPT (int_ID (R0), CPU_target (R1)); */
-	MOV R0, #29
-	MOV R1, #1
+	
+	//TIMER
+	MOV R0, #29			// Interrupt ID = 29
+	MOV R1, #1			// this field is a bit-mask; bit 0 targets cpu0
+	BL CONFIG_INTERRUPT
+	
+	//PUSH BUTTONS
+	MOV R0, #73 			// Interrupt ID = 73
+	MOV R1, #1 			// this field is a bit-mask; bit 0 targets cpu0
 	BL CONFIG_INTERRUPT
 	
 	/* configure the GIC CPU Interface */
@@ -321,7 +358,7 @@ CONFIG_GIC:
 * R1 = CPU target
 */
 CONFIG_INTERRUPT:
-	PUSH {R4-R5, LR}
+	PUSH {R1-R5, LR}
 /* Configure Interrupt Set-Enable Registers (ICDISERn).
 * reg_offset = (integer_div(N / 32) * 4
 * value = 1 << (N mod 32) */
@@ -351,29 +388,72 @@ CONFIG_INTERRUPT:
 /* Using register address in R4 and the value in R2 write to
 * (only) the appropriate byte */
 	STRB R1, [R4]
-	POP {R4-R5, PC}
+	POP {R1-R5, PC}
 
 /*************************************************************************
 * TIMER - Interrupt Service Routine
 **************************************************************************/
 TIMER_ISR:
-	END_ISR:
-		//Toggle TIMER
-		LDR R0, =TIMER
-		LDR R1, [R0]
-		EOR R1, R1, #1
-		STR R1, [R0]
-		
-		//Interrupt Acknowledge
-		LDR R0, =TIMER_BASE
-		LDR R2, [R0, #12] 	//timer interrupt at 0x0FFFEC600 + 3 bytes
-		STR R2, [R0, #12] 	//reset interrupt
-		BX LR
+	//Toggle TIMER
+	LDR R0, =TIMER
+	LDR R1, [R0]
+	EOR R1, R1, #1
+	STR R1, [R0]
+
+	//Interrupt Acknowledge
+	LDR R0, =TIMER_BASE
+	LDR R2, [R0, #12] 	//timer interrupt at 0x0FFFEC600 + 3 bytes
+	STR R2, [R0, #12] 	//reset interrupt
+	BX LR
+
+/*************************************************************************
+* PUSH BUTTON - Interrupt Service Routine
+**************************************************************************/
+PUSH_ISR:
+	//Acknowledge the interrupt
+	LDR R0, =PUSH_BASE 		// base address of pushbutton KEY port
+	LDR R1, [R0, #0xC] 		// read edge capture register
+	MOV R2, #0xF
+	STR R2, [R0, #0xC] 		// clear the interrupt
+	
+//
+CHECK_KEY0:
+	MOV R3, #0x1
+	ANDS R3, R3, R1 // check for KEY0
+	BEQ CHECK_KEY1
+	
+	//Toggle PLAY
+	LDR R0, =PLAY
+	LDR R1, [R0]
+	EOR R1, R1, #1
+	STR R1, [R0]
+	
+	B END_KEY_ISR
+CHECK_KEY1:
+	MOV R3, #0x2
+	ANDS R3, R3, R1 // check for KEY1
+	BEQ CHECK_KEY2
+	
+	//TODO
+	
+	B END_KEY_ISR
+CHECK_KEY2:
+	MOV R3, #0x4
+	ANDS R3, R3, R1 // check for KEY2
+	BEQ IS_KEY3
+	
+	//TODO
+	
+	B END_KEY_ISR
+IS_KEY3:
+	//TODO
+END_KEY_ISR:
+	BX LR
 
 end: B end
 //WELCOME: HELLO THIS IS ROCK PAPER SCISSORS GAME
-ANIMATION: .byte 0x00, 0x00, 0x00, 0x00, 0x20, 0x60, 0x44, 0x0C, 0x18, 0x50, 0x42, 0x02, 0x00, 0x00, 0x00, 0x00,0x00, 0x00, 0x00, 0x00
-WELCOME: .byte 0x76, 0x79, 0x38, 0x38, 0x5C, 0x00, 0x78, 0x76, 0x30, 0x6D,0x00, 0x30, 0x6D,0x00, 0x50, 0x5C, 0x39, 0x75, 0x00, 0x73, 0x77 ,0x73, 0x79, 0x50,0x00, 0x6D, 0x39, 0x30, 0x6D, 0x6D, 0x5C,  0x50, 0x6D,0x00, 0x3D, 0x77, 0x55, 0x79, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,0x00,0x00 
+ANIMATION: .byte 0x20, 0x60, 0x44, 0x0C, 0x18, 0x50, 0x42, 0x02
+WELCOME: .byte 0x00, 0x00, 0x00, 0x00,0x00, 0x00, 0x00, 0x00, 0x76, 0x79, 0x38, 0x38, 0x5C, 0x00, 0x78, 0x76, 0x30, 0x6D,0x00, 0x30, 0x6D,0x00, 0x50, 0x5C, 0x39, 0x75, 0x00, 0x73, 0x77 ,0x73, 0x79, 0x50,0x00, 0x6D, 0x39, 0x30, 0x6D, 0x6D, 0x5C,  0x50, 0x6D,0x00, 0x3D, 0x77, 0x55, 0x79, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,0x00,0x00 
 LETSPLAY: .byte 0x38, 0x79, 0x78, 0x6D, 0x00, 0x73, 0x38, 0x77, 0x6E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 ROCK: .byte 0x50, 0x5C, 0x39, 0x75, 0x00, 0x40, 0x00, 0x5C
 PAPER: .byte 0x73, 0x77 ,0x73, 0x79, 0x50, 0x40, 0x00, 0x3F
@@ -384,5 +464,7 @@ PAPER_BUTTON: .byte 0x73, 0x77 ,0x73, 0x79, 0x50, 0x40, 0x00, 0x5B
 SCISSORS_BUTTON: .byte 0x6D, 0x39, 0x30, 0x6D, 0x6D, 0x40, 0x00, 0x4F
 PLAY_PAUSE_BUTTON: .byte 0x73, 0x38, 0x77, 0x6E, 0x00, 0x5C, 0x50, 0x00, 0x73, 0x77, 0x3E, 0x6D, 0x79, 0x00, 0x7C, 0x3E, 0x78, 0x78, 0x5C, 0x54, 0x00, 0x40, 0x00, 0x3F
 START: .byte 0x6D, 0x78, 0x77, 0x50, 0x78, 0x00, 0x00, 0x3F
-TIMER: .word 0x0 	//initially false
+CHOOSE: .byte 0x00,0x39,0x76,0x5C,0x5C,0x6D,0x79,0x00,0x50,0x06, 0x00, 0x73,0x5B,0x00,0x6D,0x4F
+TIMER: .word 0x0 	//initially 0
+PLAY: .word 0x0		//initially 0
 .end
