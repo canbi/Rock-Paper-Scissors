@@ -107,10 +107,44 @@ Main:
 			B GameLoop
 	
 	GameFinished:
-		LDR R11, =END		//End message
-		MOV R1, #1			//iteration exit condition
-		BL Message
-		B end
+		BL FinishAndStart
+		B Main
+
+
+/*******************************************
+Finish and Start game  Subroutine
+Best of 5 control
+*/
+FinishAndStart:
+	PUSH {R1,R2,R9-R11,LR}
+	LDR R11, =END		//End message
+	MOV R1, #1			//iteration exit condition
+	BL Message
+	//waits 3 seconds
+	MOV R2, #3
+	BL Sleep
+	
+	//Update Flags as initial values
+	MOV R10, #0
+	LDR R9, =PLAY
+	STR R10, [R9]
+	LDR R9, =USER_SCORE
+	STR R10, [R9]
+	LDR R9, =COMP_SCORE
+	STR R10, [R9]
+	
+	MOV R10, #1
+	LDR R9, =NOT_FINISH
+	STR R10, [R9]
+	
+	//PUSH BUTTON configuration
+	LDR R0, =PUSH_BASE	 	//pushbutton KEY base address
+	//Initially only push button 0 is functional
+	MOV R1, #0x1 			//set interrupt mask bits
+	STR R1, [R0, #0x8] 		//interrupt mask register (base + 8)
+	
+	POP {R1,R2,R9-R11,PC}
+
 /*******************************************
 Check Results  Subroutine
 Best of 5 control
